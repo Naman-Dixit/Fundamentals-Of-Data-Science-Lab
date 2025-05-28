@@ -1,0 +1,322 @@
+# %% [code]
+---
+title: "Titanic - logistic regression With R"
+author: "Qasim"
+date: "2023-08-28"
+output:
+        html_document:
+        toc: true
+        theme: united
+---
+
+In this [notebook](https://www.kaggle.com/code/qasimalhammad/titanic-ml-from-disaster-with-r) I have already done prediction using linear regression.
+
+In This Notebook I will explore the titanic dataset to try to predict the survivals for a submission for the Titanic competition using R with logistic regression model.
+
+All the steps of cleaning data and feature engineering is already done the same way, only the model part will change.
+
+The First step will be to check the train dataset, any changes made to the train dataset must be applied to the test dataset for accurate prediction and results.
+
+```{r}
+# Load the needed libraries
+library(tidyverse)
+# Train the model
+logit_model <- glm(Survived ~ .,
+                   data = train_df,
+                   family = binomial)
+library(tidymodels)
+```
+
+We will load the datasets, however, we will name the train file as titanic, and test file will be submission. This is because I will use titanic dataset (train) for training and testing. And submission file will be used for prediction only. But first will join both datasets together so that we can clean it all at once.
+
+```{r}
+# Load Datasets   #### change path file ####
+titanic <- read.csv("/kaggle/input/titanic/train.csv")
+submission <- read.csv("/kaggle/input/titanic/test.csv")
+submission$Survived <- NA
+complete <- rbind(titanic, submission)
+```
+
+## Data exploration, cleaning and transformation
+
+```{r}
+# check dataset column name and data types.
+str(complete)
+```
+```{r}
+# check for duplicated rows
+sum(duplicated(complete))
+```
+```{r}
+# check for NA values
+colSums(is.na(complete))
+```
+```{r}
+# check empty values
+colSums(complete=="")
+```
+We can covert the name column to First name, last name and title. The title could define a social status and can help us in the prediction.
+
+```{r}
+# Separate the Name Column
+complete <- complete %>%
+separate(Name, into=c('first_name', 'other_name'), sep=',') %>%
+separate(other_name, into=c('Title', 'last_name'), sep='\\.')
+
+complete$Title <- trimws(complete$Title)
+```
+Now we will check the unique values to make sure it is consistent.
+
+```{r}
+unique(complete$Title)
+```
+
+There is some old and not used titles, for example master can be used as Mr, Mme is unmarried women which is the same as Miss. Mlle is a french equivalent of Miss. we can join similar tittles together
+
+```{r}
+complete["Title"][complete["Title"] == "Mlle"] <- "Miss"
+complete["Title"][complete["Title"] == "Ms"] <- "Miss"
+complete["Title"][complete["Title"] == "Mme"] <- "Mrs"
+complete["Title"][complete["Title"] == "Lady"] <- "Miss"
+complete["Title"][complete["Title"] == "Dona"] <- "Miss"
+officer<- c("Capt","Col","Don","Dr","Jonkheer","Major","Rev","Sir","the Countess")
+complete$Title[complete$Title %in% officer] <- "Officer"
+```
+
+We can do the same thing for Ticket column to try to extract any prefix and see if we can find any useful information.
+
+```{r}
+# check ticket has no NA
+sum(is.na(complete$Ticket))
+# replace numbers with space
+complete$Ticket <- str_replace(complete$Ticket, "^[:digit:].*$", "")
+complete$Ticket <- str_replace(complete$Ticket, " [:digit:].*$", "") %>%
+  trimws()
+# assign N which stands for number to empty fields
+complete["Ticket"][complete["Ticket"] == ''] <- "N"
+# count ticket
+complete %>%
+  count(Ticket)
+```
+We can see that there is a ticket that starts with C, we need to change this value to something else as we have cabin values that start with the same letter, we must have unique values for one hot coding to work.
+
+```{r}
+complete["Ticket"][complete["Ticket"] == 'C'] <- "Tik_C"
+```
+
+let us check the name of the columns again
+
+```{r}
+colnames(complete)
+```
+Now we will drop the following not needed columns
+
+first_name, last_name. for PassengerId we will drop this column once we start working on titanic dataset
+
+```{r}
+complete <- complete[ , -c(4, 6)]
+```
+
+The cabin has different values that start always with a letter,
+this letter could be like the location the of cabins so all cabins that start with a specific letter are in the same location. let us extract this letter.
+
+```{r}
+complete$Cabin <- substring(complete$Cabin, 1, 1)
+```
+
+```{r}
+complete %>%  count(Cabin)
+```
+We see that there is a lot of empty data in Cabin field, we can assign it to a value to indicate the lack of information. I will use No to indicate there is no data.
+
+```{r}
+complete["Cabin"][complete["Cabin"] == ''] <- "NO"
+```
+
+The last character column we have is Emarked, it should have 3 values only.
+
+```{r}
+complete %>% count(Embarked)
+```
+
+As we can see there is no empty rows, this could be the ship staff, anyway we will assign a value for it as None.
+
+```{r}
+complete["Embarked"][complete["Embarked"] == ''] <- "None"
+```
+
+Also we see that there is C in Emarked column and we need to change it to something unique.
+
+```{r}
+complete["Embarked"][complete["Embarked"] == 'C'] <- "Em_C"
+```
+
+Now for fare there is only 2 missing values, we can assign the average value.
+
+```{r}
+complete$Fare <- replace_na(complete$Fare, mean(complete$Fare, na.rm = TRUE))
+```
+
+Now the final step is to check Age range.
+
+```{r}
+# check the Age range
+range(complete$Age, na.rm = TRUE)
+```
+The most important factor that might give an indication on the age is the average age for each Title.
+
+```{r}
+complete %>% count(Title, Age) %>% filter(is.na(Age))
+```
+So we are going to calculate the average age for each group and then assign the values to NA for each group.
+
+```{r}
+complete %>%
+  group_by(Title) %>%
+  summarise( Avg_Age = mean(Age, na.rm = TRUE))
+```
+```{r}
+complete["Age"][is.na(complete["Age"]) & complete["Title"] == 'Master'] <- "5.482642"
+complete["Age"][is.na(complete["Age"]) & complete["Title"] == 'Miss'] <- "22.026000"
+complete["Age"][is.na(complete["Age"]) & complete["Title"] == 'Mr'] <- "32.252151"
+complete["Age"][is.na(complete["Age"]) & complete["Title"] == 'Mrs'] <- "36.918129"
+complete["Age"][is.na(complete["Age"]) & complete["Title"] == 'Officer'] <- "45.307692"
+complete$Age <- as.numeric(complete$Age)
+```
+**One hot coding**
+
+Now we will transform all character columns to feature columns.
+We will create a function to transform the columns needed.
+
+```{r}
+complete <- complete %>% mutate_if(is.character, as.factor)
+
+col <- c("Title", "Sex", "Ticket", "Cabin", "Embarked")
+
+feature <- function(x) {
+  for (x in col) {
+    complete <<- complete %>%
+      mutate(dummy = 1) %>%
+      spread(key = x, value = dummy, fill = 0)
+  }
+ }
+feature()
+```
+Now the final step is to do normalization of the date columns Pclass, Age, SibSp, Parch and Fare.
+
+```{r}
+# normalize dataset
+complete <- complete %>%
+  mutate(Pclass = rescale(Pclass, to = 0:1), Age = rescale(Age, to = 0:1), SibSp = rescale(SibSp, to = 0:1), Parch = rescale(Parch, to = 0:1), Fare = rescale(Fare, to = 0:1))
+```
+```{r}
+# check the final data
+summary(complete)
+```
+```{r}
+# change column names to be legal
+names(complete) <-  make.names(names(complete), unique=TRUE)
+```
+
+
+Now that we have completed the cleaning exercise and transforming categorical variables into numeric variables we can split the dataset back to titanic and submission.
+
+```{r}
+titanic <- complete %>% filter(!is.na(Survived))
+# drop PassengerId
+titanic <- titanic[,-1]
+submission <- complete %>% filter(is.na(Survived))
+# drop Survived
+submission <- submission[,-2]
+```
+
+## Building logistic regression model
+
+We will start with building the logistic regression model, but first we need to split the data to training and testing.
+
+```{r}
+set.seed(1111)
+
+titanic_split <- initial_split(titanic, prop = 0.8)
+# train_data
+titanic_training <- training(titanic_split)
+# test_data
+titanic_testing <- testing(titanic_split)
+```
+
+```{r}
+# change target variable to factor since the value for Survived is only 0 or 1
+titanic$Survived <- as.factor(titanic$Survived)
+
+titanic_training$Survived <- as.factor(titanic_training$Survived)
+
+titanic_testing$Survived <- as.factor(titanic_testing$Survived)
+```
+```{r}
+# K fold validation
+
+set.seed(123)
+
+titanic_cv <- vfold_cv(titanic_training)
+
+lr_model <-
+  logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+titanic_recipe <-
+  # which consists of the formula (outcome ~ predictors)
+  recipe(Survived ~ .,
+         data = titanic_training)
+
+lr_workflow <- workflow() %>%
+  add_recipe(titanic_recipe) %>%
+  add_model(lr_model)
+
+lr_fit <- lr_workflow %>%
+  fit(data = titanic_training)
+
+lr_fit
+```
+```{r}
+# make prediction on train data
+lr_training_results <- lr_fit %>%
+  predict(new_data = titanic_training) %>%
+  mutate(truth = titanic_training$Survived)
+
+head(lr_training_results)
+```
+```{r}
+# make prediction on test data
+lr_testing_results <- lr_fit %>%
+  predict(new_data = titanic_testing) %>%
+  mutate(truth = titanic_testing$Survived)
+
+head(lr_testing_results)
+```
+## Make prediction
+
+```{r}
+# First we will drop Passengerid as we don't want it for the prediction
+submission_pred <- submission[,-1]
+
+# make prediction on Submission data
+
+pred_sub <- predict(lr_fit, new_data = submission_pred, type= "class")
+
+head(pred_sub)
+```
+
+```{r}
+pred_sub <- as.data.frame(pred_sub)
+submission_file <- as.data.frame(cbind (submission$PassengerId, pred_sub))
+
+colnames(submission_file) <- c("PassengerId", "Survived")
+
+head(submission_file)
+```
+
+```{r}
+write.csv(submission_file, "submission_file.csv" ,row.names = FALSE)
+```
+If you would like to check prediction using linear regression you can check this [notebook](https://www.kaggle.com/code/qasimalhammad/titanic-ml-from-disaster-with-r)
