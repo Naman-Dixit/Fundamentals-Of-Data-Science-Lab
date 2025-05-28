@@ -8,7 +8,7 @@ data <- data.frame(
 # Takign AdvertisingBudget as Independent cause vibes also cause more budget = more sales
 
 # %% md
-Perform a linear regression to predict sales based on the advertising budget using R
+#Perform a linear regression to predict sales based on the advertising budget using R
 # %%
 n = length(data$AdvertisingBudget)
 y_sum = sum(data$MonthlySales)
