@@ -1,5 +1,7 @@
 # Fundamentals-Of-Data-Science-Lab
 
+Created in yeare 2 Semester 4 -> 2025
+
 **📋 Course Overview**
 This repository contains lab assignments, projects, and resources for the Fundamentals of Data Science Lab course. The course provides hands-on experience with data science tools and techniques using Excel, Python, and R programming languages.
 
